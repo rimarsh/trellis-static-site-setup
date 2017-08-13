@@ -1,0 +1,53 @@
+---
+- include: self-signed-certificate.yml
+  tags: static-setup-self-signed-certificate
+
+- name: Create web root
+  file:
+    path: "{{ www_root }}"
+    owner: "{{ web_user }}"
+    group: "{{ web_group }}"
+    mode: 0755
+    state: directory
+
+- name: Create logs folder of sites
+  file:
+    path: "{{ www_root }}/{{ item.key }}/logs"
+    owner: "{{ web_user }}"
+    group: "{{ web_group }}"
+    mode: 0755
+    state: directory
+  with_dict: "{{ static_sites }}"
+
+- include: nginx-includes.yml
+  tags: [nginx-includes, static-setup-nginx]
+
+- include: nginx.yml
+  tags: static-setup-nginx
+
+- name: Create web root of sites
+  file:
+    path: "{{ www_root }}/{{ item.key }}/{{ item.value.current_path | default('current') }}/web"
+    owner: "{{ web_user }}"
+    group: "{{ web_group }}"
+    mode: 0755
+    state: directory
+  with_dict: "{{ static_sites }}"
+
+- name: Create shared folder of sites
+  file:
+    path: "{{ www_root }}/{{ item.key }}/shared"
+    owner: "{{ web_user }}"
+    group: "{{ web_group }}"
+    mode: 0755
+    state: directory
+  with_dict: "{{ static_sites }}"
+
+- name: Change site owner to user
+  file:
+    path: "{{ www_root }}/{{ item.key }}"
+    owner: "{{ web_user }}"
+    group: "{{ web_group }}"
+    state: directory
+    recurse: yes
+  with_dict: "{{ static_sites }}"

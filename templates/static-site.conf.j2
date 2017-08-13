@@ -1,0 +1,122 @@
+# {{ ansible_managed }}
+
+{% block server_before %}{% endblock %}
+
+server {
+  {% block server_id -%}
+  listen {{ ssl_enabled | ternary('443 ssl http2', '80') }};
+  server_name {{ site_hosts_canonical | join(' ') }};
+  {% endblock %}
+
+  {% block logs -%}
+  access_log   {{ www_root }}/{{ item.key }}/logs/access.log main;
+  error_log    {{ www_root }}/{{ item.key }}/logs/error.log;
+  {% endblock %}
+
+  {% block server_basic -%}
+  root  {{ www_root }}/{{ item.key }}/{{ item.value.current_path | default('current') }}/web;
+  index index.htm index.html;
+  charset utf-8;
+
+  # Custom 404 page
+  error_page 404 /404.html;
+
+  {% if env == 'development' -%}
+  # https://www.nginx.com/resources/wiki/start/topics/tutorials/config_pitfalls/#virtualbox
+  sendfile off;
+
+  {% endif -%}
+  {% endblock -%}
+
+
+  {% block https -%}
+  {% if ssl_enabled -%}
+  # SSL configuration
+  include h5bp/directive-only/ssl.conf;
+  include h5bp/directive-only/ssl-stapling.conf;
+
+  ssl_dhparam /etc/nginx/ssl/dhparams.pem;
+  ssl_buffer_size 1400; # 1400 bytes to fit in one MTU
+
+  add_header Strict-Transport-Security "max-age={{ [hsts_max_age, hsts_include_subdomains, hsts_preload] | reject('none') | join('; ') }}";
+
+  {% if item.value.ssl.provider | default('manual') == 'manual' and item.value.ssl.cert is defined and item.value.ssl.key is defined -%}
+  ssl_certificate         {{ nginx_path }}/ssl/{{ item.value.ssl.cert | basename }};
+  ssl_certificate_key     {{ nginx_path }}/ssl/{{ item.value.ssl.key | basename }};
+
+  {% elif item.value.ssl.provider | default('manual') == 'letsencrypt' -%}
+  ssl_certificate         {{ nginx_path }}/ssl/letsencrypt/{{ item.key }}-{{ letsencrypt_cert_ids[item.key] }}-bundled.cert;
+  ssl_certificate_key     {{ nginx_path }}/ssl/letsencrypt/{{ item.key }}.key;
+
+  {% elif item.value.ssl.provider | default('manual') == 'self-signed' -%}
+  ssl_certificate         {{ nginx_path }}/ssl/{{ item.key }}.cert;
+  ssl_trusted_certificate {{ nginx_path }}/ssl/{{ item.key }}.cert;
+  ssl_certificate_key     {{ nginx_path }}/ssl/{{ item.key }}.key;
+
+  {% endif -%}
+  {% endif -%}
+  {% endblock -%}
+
+  {% block acme_challenge -%}
+  include acme-challenge-location.conf;
+
+  {% endblock -%}
+
+  {% block includes_d -%}
+  include includes.d/{{ item.key }}/*.conf;
+
+  {% endblock -%}
+
+  {% block location_primary -%}
+  location / {
+    try_files $uri $uri/ =404;
+  }
+  {% endblock %}
+
+
+  {% block h5bp -%}
+  include h5bp/directive-only/x-ua-compatible.conf;
+  include h5bp/directive-only/extra-security.conf;
+  include h5bp/location/cross-domain-fonts.conf;
+  include h5bp/location/protect-system-files.conf;
+  {% endblock %}
+
+
+}
+
+{% block redirects_https %}
+{% if ssl_enabled %}
+# Redirect to https
+server {
+  listen 80;
+  server_name {{ site_hosts }};
+
+  {{ self.acme_challenge() -}}
+
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+{% endif %}
+{% endblock -%}
+
+{%- block redirects_domains %}
+{% if site_hosts_redirects | default([]) | count %}
+# Redirect some domains
+{% endif %}
+{% for host in item.value.site_hosts if host.redirects | default([]) %}
+server {
+  listen {{ ssl_enabled | ternary('443 ssl http2', '80') }};
+  server_name {{ host.redirects | join(' ') }};
+
+  {{ self.https() -}}
+
+  {{ self.acme_challenge() -}}
+
+  location / {
+    return 301 $scheme://{{ host.canonical }}$request_uri;
+  }
+}
+{% endfor %}
+{% endblock %}
