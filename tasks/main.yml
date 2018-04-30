@@ -25,15 +25,6 @@
 - include: nginx.yml
   tags: static-setup-nginx
 
-- name: Create web root of sites
-  file:
-    path: "{{ www_root }}/{{ item.key }}/{{ item.value.current_path | default('current') }}/web"
-    owner: "{{ web_user }}"
-    group: "{{ web_group }}"
-    mode: 0755
-    state: directory
-  with_dict: "{{ static_sites }}"
-
 - name: Create shared folder of sites
   file:
     path: "{{ www_root }}/{{ item.key }}/shared"
